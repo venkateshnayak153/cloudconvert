@@ -1,0 +1,22 @@
+{
+  "name": "cloudconvert",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri:dev-helper": "python3 ./helper/main.py",
+    
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-shell": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
+    "@tauri-apps/plugin-notification": "^2.0.0",
+    "@tauri-apps/plugin-store": "^2.0.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  }
+}

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CloudConvert</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <!-- Inline script runs BEFORE any module, blocks browser from navigating to dropped files -->
+    <script>
+      (function () {
+        function block(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.dataTransfer) {
+            e.dataTransfer.dropEffect = "copy";
+          }
+        }
+        ["dragenter", "dragover", "dragleave", "drop"].forEach(function (ev) {
+          document.addEventListener(ev, block, { capture: true, passive: false });
+          window.addEventListener(ev, block, { capture: true, passive: false });
+        });
+      })();
+    </script>
+    <div id="app">
+      <!-- Main Floating Cloud Widget -->
+      <div id="cloud-container" class="cloud-state-idle" data-tauri-drag-region>
+        <div class="cloud-shadow"></div>
+        <div class="cloud-body" id="cloud-body">
+          <!-- Circular Progress Ring (Visible during processing) -->
+          <svg class="progress-ring" viewBox="0 0 80 80">
+            <circle class="progress-ring-bg" cx="40" cy="40" r="36" />
+            <circle class="progress-ring-bar" id="progress-bar" cx="40" cy="40" r="36" />
+          </svg>
+
+          <!-- Cloud Base SVG -->
+          <svg class="cloud-svg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path
+              d="M48 44C53.5228 44 58 39.5228 58 34C58 28.7905 54.0205 24.5103 48.9554 24.0487C47.8863 17.1818 41.9796 12 34.8 12C28.4716 12 23.1118 16.1408 21.4191 22.0255C20.6385 21.8441 19.8279 21.75 19 21.75C12.9249 21.75 8 26.6749 8 32.75C8 38.8251 12.9249 43.75 19 43.75L48 44Z"
+              class="cloud-fill"
+            />
+          </svg>
+
+          <!-- State Overlay Icons -->
+          <div class="cloud-state-icon" id="state-icon">
+            <span class="icon-plus">+</span>
+            <span class="icon-check">✓</span>
+            <span class="icon-error">!</span>
+          </div>
+        </div>
+
+        <!-- Tooltip -->
+        <div class="cloud-tooltip" id="cloud-tooltip">Drop a file or click</div>
+      </div>
+
+      <!-- Format Picker Popover -->
+      <div id="format-picker" class="picker-card hidden">
+        <div class="picker-header">
+          <span class="picker-icon" id="picker-file-icon">📄</span>
+          <div class="picker-meta">
+            <div class="picker-filename" id="picker-filename">document.docx</div>
+            <div class="picker-subtitle">Convert to:</div>
+          </div>
+          <button class="picker-close" id="picker-close-btn" title="Cancel (Esc)">✕</button>
+        </div>
+
+        <div class="picker-formats" id="picker-formats">
+          <!-- Buttons generated dynamically (PDF, DOCX, etc.) -->
+        </div>
+
+        <!-- Sub-options for PPTX -->
+        <div class="picker-pptx-options hidden" id="picker-pptx-options">
+          <span class="pptx-opt-label">Slides as:</span>
+          <label class="radio-label">
+            <input type="radio" name="pptx-mode" value="image" checked />
+            <span>Images (exact)</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="pptx-mode" value="editable" />
+            <span>Editable</span>
+          </label>
+        </div>
+
+        <div class="picker-footer">
+          <label class="remember-label">
+            <input type="checkbox" id="picker-remember" />
+            <span>Remember choice</span>
+          </label>
+          <button class="btn btn-secondary" id="picker-cancel-btn">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Attached Progress & Result Toast -->
+      <div id="status-toast" class="toast-card hidden">
+        <!-- Progress View -->
+        <div id="toast-progress-view">
+          <div class="toast-header">
+            <span class="toast-title" id="toast-progress-title">Converting…</span>
+            <span class="toast-percent" id="toast-progress-pct">0%</span>
+          </div>
+          <div class="toast-bar-track">
+            <div class="toast-bar-fill" id="toast-bar-fill" style="width: 0%"></div>
+          </div>
+          <div class="toast-actions">
+            <span class="toast-stage" id="toast-stage-text">Preparing…</span>
+            <button class="btn btn-sm btn-ghost" id="toast-cancel-btn">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Success View -->
+        <div id="toast-success-view" class="hidden">
+          <div class="toast-success-header">
+            <span class="toast-check-badge">✓</span>
+            <span class="toast-success-filename" id="toast-success-name">file_converted.pdf</span>
+          </div>
+          <div class="toast-success-actions">
+            <button class="btn btn-sm btn-primary" id="toast-open-btn">Open</button>
+            <button class="btn btn-sm btn-secondary" id="toast-show-folder-btn">Show in folder</button>
+            <button class="btn btn-sm btn-ghost" id="toast-copy-path-btn">Copy path</button>
+          </div>
+        </div>
+
+        <!-- Error View -->
+        <div id="toast-error-view" class="hidden">
+          <div class="toast-error-header">
+            <span class="toast-err-badge">!</span>
+            <span class="toast-error-msg" id="toast-error-message">Error converting file</span>
+          </div>
+          <div class="toast-error-actions">
+            <button class="btn btn-sm btn-ghost" id="toast-details-btn">Details</button>
+            <button class="btn btn-sm btn-secondary" id="toast-dismiss-btn">Dismiss</button>
+          </div>
+          <div class="toast-details-log hidden" id="toast-details-log"></div>
+        </div>
+      </div>
+
+      <!-- Settings Dialog -->
+      <div id="settings-dialog" class="modal-backdrop hidden">
+        <div class="modal-card">
+          <div class="modal-header">
+            <h3>CloudConvert Settings</h3>
+            <button class="modal-close" id="settings-close-btn">✕</button>
+          </div>
+          <div class="modal-body">
+            <!-- Tabs -->
+            <div class="tabs-nav">
+              <button class="tab-btn active" data-tab="general">General</button>
+              <button class="tab-btn" data-tab="output">Output</button>
+              <button class="tab-btn" data-tab="engines">Engines</button>
+              <button class="tab-btn" data-tab="pptx">PDF to PPTX</button>
+            </div>
+
+            <!-- Tab: General -->
+            <div class="tab-pane active" id="tab-general">
+              <div class="setting-row">
+                <label>Launch at login</label>
+                <input type="checkbox" id="set-autostart" />
+              </div>
+              <div class="setting-row">
+                <label>Idle opacity</label>
+                <div class="range-wrap">
+                  <input type="range" id="set-opacity" min="30" max="100" value="70" />
+                  <span id="set-opacity-val">70%</span>
+                </div>
+              </div>
+              <div class="setting-row">
+                <label>Cloud size</label>
+                <select id="set-size">
+                  <option value="s">Small (56px)</option>
+                  <option value="m" selected>Medium (72px)</option>
+                  <option value="l">Large (96px)</option>
+                </select>
+              </div>
+              <div class="setting-row">
+                <label>Theme</label>
+                <select id="set-theme">
+                  <option value="system">System</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Tab: Output -->
+            <div class="tab-pane" id="tab-output">
+              <div class="setting-row">
+                <label>Destination</label>
+                <select id="set-output-mode">
+                  <option value="next_to_original" selected>Next to original file</option>
+                  <option value="custom">Fixed folder…</option>
+                </select>
+              </div>
+              <div class="setting-row hidden" id="custom-folder-row">
+                <input type="text" id="set-custom-folder" readonly placeholder="Choose folder…" />
+                <button class="btn btn-sm" id="btn-browse-folder">Browse</button>
+              </div>
+              <div class="setting-row">
+                <label>Filename suffix</label>
+                <input type="text" id="set-suffix" value="_converted" />
+              </div>
+              <div class="setting-row">
+                <label>Open file after conversion</label>
+                <input type="checkbox" id="set-auto-open" />
+              </div>
+            </div>
+
+            <!-- Tab: Engines -->
+            <div class="tab-pane" id="tab-engines">
+              <div class="engine-item">
+                <div class="engine-info">
+                  <strong>Microsoft Word</strong>
+                  <span class="engine-status" id="status-word">Checking…</span>
+                </div>
+              </div>
+              <div class="engine-item">
+                <div class="engine-info">
+                  <strong>Microsoft PowerPoint</strong>
+                  <span class="engine-status" id="status-powerpoint">Checking…</span>
+                </div>
+              </div>
+              <div class="engine-item">
+                <div class="engine-info">
+                  <strong>LibreOffice</strong>
+                  <span class="engine-status" id="status-libreoffice">Checking…</span>
+                </div>
+                <a
+                  href="https://www.libreoffice.org/download/download-libreoffice/"
+                  target="_blank"
+                  class="btn btn-sm btn-outline hidden"
+                  id="btn-install-libreoffice"
+                >
+                  Install LibreOffice (Free)
+                </a>
+              </div>
+              <div class="engine-item">
+                <div class="engine-info">
+                  <strong>Bundled Python PDF Engines</strong>
+                  <span class="engine-status status-ok">✓ Ready (PDF ↔ DOCX / PPTX)</span>
+                </div>
+              </div>
+              <div class="setting-row" style="margin-top: 14px">
+                <label>Preferred Engine</label>
+                <select id="set-preferred-engine">
+                  <option value="auto">Auto (Recommended)</option>
+                  <option value="office">Microsoft Office</option>
+                  <option value="libreoffice">LibreOffice</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Tab: PDF to PPTX -->
+            <div class="tab-pane" id="tab-pptx">
+              <p class="section-desc">Choose default presentation conversion mode:</p>
+              <label class="radio-block">
+                <input type="radio" name="default-pptx-mode" value="image" checked />
+                <div>
+                  <strong>Images (Exact Look)</strong>
+                  <p>Renders each page as a crisp high-res slide. Layout and typography are 100% faithful to the PDF.</p>
+                </div>
+              </label>
+              <label class="radio-block">
+                <input type="radio" name="default-pptx-mode" value="editable" />
+                <div>
+                  <strong>Editable Text & Shapes</strong>
+                  <p>Extracts editable text boxes and images. Layout may occasionally shift for complex PDFs.</p>
+                </div>
+              </label>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-primary" id="settings-save-btn">Done</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hidden file input for file picker fallback -->
+      <input type="file" id="file-picker-input" class="hidden" accept=".pdf,.doc,.docx,.ppt,.pptx" />
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
