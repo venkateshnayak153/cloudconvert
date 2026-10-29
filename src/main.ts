@@ -10,6 +10,54 @@ const settings = new SettingsModal();
 const isTauri = () => (window as any).__TAURI__?.core?.invoke !== undefined;
 let currentJobId: string | null = null;
 
+if ((window as any).__TAURI__) {
+  const { listen } = (window as any).__TAURI__.event;
+
+  // Native Tauri drag & drop events on macOS
+  listen("tauri://drag-drop", (event: any) => {
+    const paths = event.payload?.paths;
+    if (paths && paths.length > 0) {
+      handleFileDropped(paths[0]);
+    }
+  });
+
+  listen("tauri://drag-enter", () => {
+    if (cloud.getState() !== "processing") {
+      cloud.setState("dragover");
+    }
+  });
+
+  listen("tauri://drag-leave", () => {
+    if (cloud.getState() === "dragover") {
+      cloud.setState("idle");
+    }
+  });
+
+  listen("conversion-progress", (event: any) => {
+    const payload = event.payload;
+    cloud.setProgress(payload.percent);
+    toast.updateProgress(payload.percent, payload.stage || "Converting…");
+  });
+
+  listen("conversion-done", (event: any) => {
+    const payload = event.payload;
+    cloud.setState("success");
+    cloud.setProgress(100);
+    toast.showSuccess(payload.output);
+  });
+
+  listen("conversion-error", (event: any) => {
+    const payload = event.payload;
+    cloud.setState("error");
+    toast.showError(payload.code, payload.message);
+  });
+
+  listen("open-settings", () => {
+    settings.show();
+  });
+}
+
+
 // Valid formats mapping
 const VALID_TARGETS_MAP: Record<string, string[]> = {
   pdf: ["docx", "doc", "pptx", "ppt"],
@@ -53,6 +101,18 @@ function getFileExtension(filename: string): string {
 function handleFileDropped(filePath: string, fileName?: string, fileObj?: File) {
   const rawName = fileName || filePath.split(/[/\\]/).pop() || filePath;
   let ext = getFileExtension(rawName);
+
+  // If a conversion is already in progress, ask the user whether to cancel it
+  if (cloud.getState() === "processing") {
+    const confirmCancel = window.confirm(
+      "A conversion is already in progress. Cancel it and start a new one?"
+    );
+    if (confirmCancel) {
+      cancelConversion();
+    } else {
+      return; // abort handling this new drop
+    }
+  }
 
   // Fallback to MIME type if extension is missing or unparseable
   if (!ext && fileObj && fileObj.type && MIME_MAP[fileObj.type]) {
@@ -258,60 +318,6 @@ if (fileInput) {
 // -------------------------------------------------------------------
 // Tauri Native Events Listener
 // -------------------------------------------------------------------
-if ((window as any).__TAURI__) {
-  const { listen } = (window as any).__TAURI__.event;
-
-  // Native Tauri drag & drop events on macOS
-  listen("tauri://drag-drop", (event: any) => {
-    const paths = event.payload?.paths;
-    if (paths && paths.length > 0) {
-      handleFileDropped(paths[0]);
-    }
-  });
-
-  listen("tauri://drag-enter", () => {
-    if (cloud.getState() !== "processing") {
-      cloud.setState("dragover");
-    }
-  });
-
-  listen("tauri://drag-leave", () => {
-    if (cloud.getState() === "dragover") {
-      cloud.setState("idle");
-    }
-  });
-
-  listen("conversion-progress", (event: any) => {
-    const payload = event.payload;
-    cloud.setProgress(payload.percent);
-    toast.updateProgress(payload.percent, payload.stage || "Converting…");
-  });
-
-  listen("conversion-done", (event: any) => {
-    const payload = event.payload;
-    cloud.setState("success");
-    cloud.setProgress(100);
-    toast.showSuccess(payload.output);
-  });
-
-  listen("conversion-error", (event: any) => {
-    const payload = event.payload;
-    cloud.setState("error");
-    toast.showError(payload.code, payload.message);
-  });
-
-  listen("open-settings", () => {
-    settings.show();
-  });
-
-  listen("tray-open-file", () => {
-    (window as any).__TAURI__.core.invoke("open_file_dialog").then((filePath: string | null) => {
-      if (filePath) {
-        handleFileDropped(filePath);
-      }
-    });
-  });
-}
 
 // Right click context menu
 window.addEventListener("contextmenu", (e) => {
